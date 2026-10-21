@@ -172,13 +172,27 @@ const serveEnvironmentCommand = async (
     return cliError(transportError(endpoint.value, cause));
   }
   let failure: StreamableHttpListenError | undefined;
+  let closeFailure: unknown;
   try {
     failure = await Promise.race([untilAborted(signal), listenerFailed]);
   } finally {
-    await served.close();
+    try {
+      await served.close();
+    } catch (cause: unknown) {
+      closeFailure = cause;
+    }
   }
-  if (failure !== undefined)
-    return cliError(transportError(endpoint.value, failure));
+  if (failure !== undefined) {
+    const primary = transportError(endpoint.value, failure);
+    if (closeFailure !== undefined)
+      throw new AggregateError(
+        [primary, closeFailure],
+        "Listener failed and its cleanup also failed",
+        { cause: primary },
+      );
+    return cliError(primary);
+  }
+  if (closeFailure !== undefined) throw closeFailure;
   return {
     status: "stopped",
     url: served.url,

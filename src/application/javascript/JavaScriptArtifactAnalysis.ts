@@ -11,7 +11,7 @@ import { projectJavaScriptModuleSemantics } from "../../domain/javascript/javasc
 import { parseJavaScriptSource } from "../../domain/javascript/javascriptSourceParser.js";
 import { hasValidSourceMapContents } from "../../domain/sourceMapContents.js";
 import {
-  flattenSourceMapLeaves,
+  recoverSourceMapLeaves,
   sourceMapJsonText,
   sourceMapMappingsSchema,
 } from "../../domain/sourceMapEnvelope.js";
@@ -593,34 +593,39 @@ const parseSourceMap = (
     void cause;
     return invalidSourceMap(file, "Source map is not valid JSON.");
   }
-  const maps = flattenSourceMapLeaves(value);
-  if (maps === undefined)
+  const recovered = recoverSourceMapLeaves(value);
+  if (recovered === undefined)
     return invalidSourceMap(file, "Source map is not a version 3 map.");
-  return collectSourceMapOriginals(file, maps);
+  return collectSourceMapOriginals(
+    file,
+    recovered.leaves,
+    recovered.malformed ? "Source map has an invalid indexed section." : null,
+  );
 };
 
 const collectSourceMapOriginals = (
   file: JavaScriptArtifactFile,
   maps: readonly Readonly<Record<string, unknown>>[],
+  initialLimitation: string | null = null,
 ): JavaScriptSourceMapObservation => {
   const sources: JavaScriptSourceMapOriginal[] = [];
-  let limitation: string | null = null;
+  let limitation: string | null = initialLimitation;
   let declarationIndex = 0;
   for (const map of maps) {
     const names = map.sources;
     if (!Array.isArray(names))
-      return invalidSourceMap(file, "Source map has no sources array.");
+      return invalidSourceMap(file, "Source map has no sources array.", sources);
     const contents = map.sourcesContent;
     if (!hasValidSourceMapContents(contents))
       return invalidSourceMap(
         file,
         "Source map sourcesContent must be an array of strings or null entries.",
-      );
+      , sources);
     if (map.sourceRoot != null && typeof map.sourceRoot !== "string")
       return invalidSourceMap(
         file,
         "Source map sourceRoot must be a string or null.",
-      );
+      , sources);
     const root = typeof map.sourceRoot === "string" ? map.sourceRoot : null;
     const sourceNames: (string | null)[] = [];
     for (const raw of names) {
@@ -628,7 +633,7 @@ const collectSourceMapOriginals = (
         return invalidSourceMap(
           file,
           "Source map contains a non-string source name.",
-        );
+        , sources);
       sourceNames.push(raw);
     }
     const references = resolveJavaScriptSourceMapReferences(
