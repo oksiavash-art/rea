@@ -200,3 +200,53 @@ it("retains declarations before and after an invalid indexed-map leaf", async ()
     );
   }
 });
+
+it("retains prior and later declarations when an indexed leaf lacks sources", async () => {
+  const mapText = JSON.stringify({
+    version: 3,
+    sections: [
+      { offset: { line: 0, column: 0 }, map: {
+        version: 3, sources: ["before.ts"], sourcesContent: ["before"],
+        names: [], mappings: "AAAA",
+      } },
+      { offset: { line: 1, column: 0 }, map: {
+        version: 3, names: [], mappings: "AAAA",
+      } },
+      { offset: { line: 2, column: 0 }, map: {
+        version: 3, sources: ["after.ts"], sourcesContent: ["after"],
+        names: [], mappings: "AAAA",
+      } },
+    ],
+  });
+  const graph = await analyzeMaps({ "indexed.js.map": mapText });
+  expect(graph.coverage.status).toBe("partial");
+  const names = graph.nodes
+    .filter((node) => node.identity.strategy === "source-map-original")
+    .map((node) => node.identity.original_source);
+  expect(names).toContain("before.ts");
+  expect(names).toContain("after.ts");
+  expect(names).toHaveLength(2);
+});
+
+it("retains valid declarations around a structurally malformed indexed section", async () => {
+  const mapText = JSON.stringify({
+    version: 3,
+    sections: [
+      { offset: { line: 0, column: 0 }, map: {
+        version: 3, sources: ["before.ts"], mappings: "AAAA",
+      } },
+      { offset: { line: 1, column: 0 }, url: "unavailable.map" },
+      { offset: { line: 2, column: 0 }, map: {
+        version: 3, sources: ["after.ts"], mappings: "AAAA",
+      } },
+    ],
+  });
+  const graph = await analyzeMaps({ "indexed.js.map": mapText });
+  expect(graph.coverage.status).toBe("partial");
+  const names = graph.nodes
+    .filter((node) => node.identity.strategy === "source-map-original")
+    .map((node) => node.identity.original_source);
+  expect(names).toContain("before.ts");
+  expect(names).toContain("after.ts");
+  expect(names).toHaveLength(2);
+});
