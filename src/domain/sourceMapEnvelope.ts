@@ -32,22 +32,49 @@ const isVersion3Map = (value: unknown): value is SourceMapRecord =>
  * nor `sections` yields itself as the single leaf; callers decide whether
  * that leaf is valid content.
  */
-export const flattenSourceMapLeaves = (
+/**
+ * Recover declarations from valid indexed-map leaves even when another section
+ * is malformed. Malformed structure must still make overall coverage partial.
+ * Only the artifact declaration collector uses this tolerant view; strict
+ * mapping decoders continue to reject invalid envelopes.
+ */
+export const recoverSourceMapLeaves = (
   root: unknown,
-): readonly SourceMapRecord[] | undefined => {
+): { readonly leaves: readonly SourceMapRecord[]; readonly malformed: boolean } | undefined => {
   if (!isVersion3Map(root)) return undefined;
   const leaves: SourceMapRecord[] = [];
   const pending: unknown[] = [root];
+  let malformed = false;
   while (pending.length > 0) {
     const map = pending.pop();
-    if (!isVersion3Map(map)) return undefined;
-    if (Array.isArray(map.sections)) {
+    if (!isVersion3Map(map)) {
+      malformed = true;
+      continue;
+    }
+    if (map.sections !== undefined) {
+      if (!Array.isArray(map.sections)) {
+        malformed = true;
+        continue;
+      }
       for (let index = map.sections.length - 1; index >= 0; index -= 1) {
         const section = map.sections[index];
-        if (!isRecord(section) || !isRecord(section.map)) return undefined;
+        if (!isRecord(section) || !isVersion3Map(section.map)) {
+          malformed = true;
+          continue;
+        }
         pending.push(section.map);
       }
     } else leaves.push(map);
   }
-  return leaves;
+  return { leaves, malformed };
+};
+
+/** Strict callers reject the entire envelope if any section is malformed. */
+export const flattenSourceMapLeaves = (
+  root: unknown,
+): readonly SourceMapRecord[] | undefined => {
+  const recovered = recoverSourceMapLeaves(root);
+  return recovered === undefined || recovered.malformed
+    ? undefined
+    : recovered.leaves;
 };
